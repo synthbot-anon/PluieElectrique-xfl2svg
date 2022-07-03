@@ -46,7 +46,6 @@ def parse_fill_style(style):
         attrib["fill"] = f"url(#{gradient.id})"
         extra_defs[gradient.id] = gradient.to_svg()
     elif style.tag.endswith("RadialGradient"):
-        # TODO: Support RadialGradient
         gradient = RadialGradient.from_xfl(style)
         attrib["fill"] = f"url(#{gradient.id})"
         extra_defs[gradient.id] = gradient.to_svg()
