@@ -29,7 +29,7 @@ def parse_solid_color(style):
     return style.get("color", "#000000"), style.get("alpha")
 
 
-def parse_fill_style(style):
+def parse_fill_style(style, bounding_box):
     """Parse an XFL <FillStyle> element.
 
     Returns a tuple:
@@ -55,7 +55,7 @@ def parse_fill_style(style):
     return attrib, extra_defs
 
 
-def parse_stroke_style(style):
+def parse_stroke_style(style, bounding_box):
     """Parse an XFL <StrokeStyle> element.
 
     Returns a dict of SVG style attributes.

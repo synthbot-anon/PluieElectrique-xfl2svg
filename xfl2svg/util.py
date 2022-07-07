@@ -47,3 +47,18 @@ def get_matrix(element):
         ]
 
     return IDENTITY_MATRIX
+
+
+def merge_bounding_boxes(original, addition):
+    if addition == None:
+        return original
+
+    if original == None:
+        return addition
+
+    return (
+        min(original[0], addition[0]),
+        min(original[1], addition[1]),
+        max(original[2], addition[2]),
+        max(original[3], addition[3]),
+    )
