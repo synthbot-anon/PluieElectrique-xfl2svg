@@ -2,6 +2,7 @@
 
 import warnings
 import xml.etree.ElementTree as ET
+from numpy import expand_dims
 
 from xfl2svg.shape.edge import xfl_edge_to_shapes
 from xfl2svg.shape.style import parse_fill_style, parse_stroke_style
@@ -43,9 +44,17 @@ def point_list_to_path_format(point_list: list) -> str:
             # require a function like point_lists_to_shapes(), but for strokes.
             # For now, though, adding "Z" to any stroke that is already closed
             # seems good enough.
-            path.append("Z")
+            # path.append("Z")
+            pass
         return " ".join(path)
 
+def expanding_bounding_box(box, width):
+    return (
+        box[0] - width/2,
+        box[1] - width/2,
+        box[2] + width/2,
+        box[3] + width/2
+    )
 
 def xfl_domshape_to_svg(domshape, mask=False):
     """Convert the XFL <DOMShape> element to SVG <path> elements.
@@ -96,10 +105,15 @@ def xfl_domshape_to_svg(domshape, mask=False):
     stroked_paths = []
     for stroke_id, stroke_data in strokes.items():
         point_lists, curr_bounding_box = stroke_data
+        style = stroke_styles[stroke_id]
         # TODO: Figure out how strokes are supposed to behave in masks
         if mask:
             warnings.warn("Strokes in masks are not supported")
-        stroke_style = parse_stroke_style(style[0], curr_bounding_box)
+        stroke_style, stroke_extra = parse_stroke_style(style[0], curr_bounding_box)
+        extra_defs.update(stroke_extra)
+
+        stroke_width = float(stroke_style.get('stroke-width', 1))
+        curr_bounding_box = expanding_bounding_box(curr_bounding_box, stroke_width)
 
         stroke = ET.Element("path", stroke_style)
         stroke.set("d", " ".join(point_list_to_path_format(pl) for pl in point_lists))

@@ -29,6 +29,12 @@ def parse_solid_color(style):
     return style.get("color", "#000000"), style.get("alpha")
 
 
+def get_radius(bounding_box):
+    width = bounding_box[2] - bounding_box[0]
+    height = bounding_box[3] - bounding_box[1]
+    return (width**2 + height**2) ** 0.5 / 2
+
+
 def parse_fill_style(style, bounding_box):
     """Parse an XFL <FillStyle> element.
 
@@ -46,7 +52,8 @@ def parse_fill_style(style, bounding_box):
         attrib["fill"] = f"url(#{gradient.id})"
         extra_defs[gradient.id] = gradient.to_svg()
     elif style.tag.endswith("RadialGradient"):
-        gradient = RadialGradient.from_xfl(style)
+        radius = get_radius(bounding_box)
+        gradient = RadialGradient.from_xfl(style, radius)
         attrib["fill"] = f"url(#{gradient.id})"
         extra_defs[gradient.id] = gradient.to_svg()
     else:
@@ -62,12 +69,12 @@ def parse_stroke_style(style, bounding_box):
     """
     if not style.tag.endswith("SolidStroke"):
         warnings.warn(f"Unknown stroke style: {xml_str(style)}")
-        return {"fill": "none"}
+        return {"fill": "none"}, {}
 
     check_known_attrib(style, {"scaleMode", "weight", "joints", "miterLimit", "caps", "solidStyle"})
     if style.get("scaleMode") != "normal":
         warnings.warn(f"Unknown `scaleMode` value: {style.get('scaleMode')}")
-        return {"fill": "none"}
+        # return {"fill": "none"}, {}
 
     cap = style.get("caps", "round")
     if cap == "none":
@@ -79,6 +86,7 @@ def parse_stroke_style(style, bounding_box):
         "stroke-linejoin": style.get("joints", "round"),
         "fill": "none",
     }
+    extra_defs = {}
 
     solid = style.get("solidStyle")
     if solid:
@@ -87,17 +95,8 @@ def parse_stroke_style(style, bounding_box):
         else:
             # A hairline solidStyle overrides the 'weight' attribute.
             attrib['stroke-width'] = "0.05"
-
-    fill = style[0][0]
-    if fill.tag.endswith("RadialGradient"):
-        # TODO: Support RadialGradient
-        warnings.warn("RadialGradient is not supported yet")
-        return attrib
-    elif not fill.tag.endswith("SolidColor"):
-        warnings.warn(f"Unknown stroke fill: {xml_str(fill)}")
-        return attrib
-
-    update(attrib, ("stroke", "stroke-opacity"), parse_solid_color(fill))
+    
+    
     if attrib["stroke-linejoin"] == "miter":
         # If the XFL does not specify a miterLimit, Animate's SVG exporter will
         # set stroke-miterlimit to 3. This seems to match what Flash does [*].
@@ -107,4 +106,16 @@ def parse_stroke_style(style, bounding_box):
         # [*]: https://github.com/ruffle-rs/ruffle/blob/d3becd9/core/src/avm1/globals/movie_clip.rs#L283-L290
         attrib["stroke-miterlimit"] = style.get("miterLimit", "5")
 
-    return attrib
+    fill = style[0][0]
+    if fill.tag.endswith("RadialGradient"):
+        radius = get_radius(bounding_box)
+        gradient = RadialGradient.from_xfl(fill, radius)
+        attrib["stroke"] = f"url(#{gradient.id})"
+        extra_defs[gradient.id] = gradient.to_svg()
+    elif fill.tag.endswith("SolidColor"):
+        update(attrib, ("stroke", "stroke-opacity"), parse_solid_color(fill))
+    else:
+        warnings.warn(f"Unknown stroke fill: {xml_str(fill)}")
+        return attrib, extra_defs
+
+    return attrib, extra_defs

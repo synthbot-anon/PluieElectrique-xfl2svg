@@ -90,20 +90,24 @@ class LinearGradient:
 class RadialGradient:
     matrix: Tuple[float, ...]
     radius: float
+    focal_point: float
     stops: Tuple[Tuple[float, str, str], ...]
     spread_method: str
 
     @classmethod
-    def from_xfl(cls, element):
+    def from_xfl(cls, element, radius):
         a, b, c, d, tx, ty = map(float, get_matrix(element))
-        radius = a**2 + b**2 + c**2
+        focal_point = float(element.get("focalPointRatio", 0)) * radius
 
         norm = (a**2 + b**2) ** 0.5
-        svg_a = a / norm
-        svg_b = b / norm
-        svg_c = c / norm
-        svg_d = d / norm
-        svg_matrix = (svg_a, svg_b, svg_c, svg_d, tx, ty)
+        if norm == 0:
+            svg_matrix = ('NaN', 'NaN', 'NaN', 'NaN')
+        else:
+            svg_a = a / norm
+            svg_b = b / norm
+            svg_c = c / norm
+            svg_d = d / norm
+            svg_matrix = (svg_a, svg_b, svg_c, svg_d, tx, ty)
 
         stops = []
         for entry in element.iterfind("{*}GradientEntry"):
@@ -116,10 +120,10 @@ class RadialGradient:
                 )
             )
 
-        check_known_attrib(element, {"spreadMethod"})
+        check_known_attrib(element, {"spreadMethod", "focalPointRatio"})
         spread_method = element.get("spreadMethod", "pad")
 
-        return cls(svg_matrix, radius, tuple(stops), spread_method)
+        return cls(svg_matrix, radius, focal_point, tuple(stops), spread_method)
 
     def to_svg(self):
         """Create an SVG <linearGradient> element from a LinearGradient."""
@@ -132,7 +136,7 @@ class RadialGradient:
                 "cx": "0",
                 "cy": "0",
                 "r": str(self.radius),
-                "fx": "0",
+                "fx": str(self.focal_point),
                 "fy": "0",
                 "gradientTransform": f"matrix({','.join(matrix)})",
                 "spreadMethod": self.spread_method,

@@ -23,6 +23,7 @@ def check_known_attrib(element, known):
             f"  Known keys:   {known}\n"
             f"  Unknown keys: {unknown}"
         )
+        raise Exception()
 
 
 def get_matrix(element):

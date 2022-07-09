@@ -38,10 +38,12 @@ in how everything works, read on.
 #    <path> element, and assign fill/stroke style attributes to the <path>.
 
 
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
+from dataclasses import dataclass
+from email.policy import default
 import math
 import re
-from typing import Dict, Iterator, List, Tuple
+from typing import Dict, Iterator, List, Set, Tuple
 import warnings
 import xml.etree.ElementTree as ET
 
@@ -107,7 +109,7 @@ def parse_number(num: str) -> float:
 
 
 def line_bounding_box(p1, p2):
-    return (min(p1[0], p2[0]), max(p1[0], p2[0]), min(p1[1], p2[1]), max(p1[1], p2[1]))
+    return (min(p1[0], p2[0]), min(p1[1], p2[1]), max(p1[0], p2[0]), max(p1[1], p2[1]))
 
 
 def quadratic_bezier(p1, p2, p3, t):
@@ -334,6 +336,85 @@ def edge_format_to_point_lists(edges: str) -> Iterator[list]:
 #                      +----->+
 
 
+
+class FasterList:
+    def __init__(self):
+        super().__init__()
+        self.backing = []
+        self.removed = defaultdict(lambda: 0)
+        self.counts = defaultdict(lambda: 0)
+        self.index = 0
+        self.length = 0
+
+    def append(self, item):
+        self.backing.append(item)
+        self.counts[item] += 1
+        self.length += 1
+
+    def remove(self, item):
+        if self.counts[item]:
+            self.removed[item] += 1
+            self.counts[item] -= 1
+            self.length -= 1
+
+    def pop(self):
+        result = self.backing[self.index]
+        while self.removed[result]:
+            self.removed[result] -= 1
+            self.index += 1
+            result = self.backing[self.index]
+        self.counts[result] -= 1
+        self.index += 1
+        self.length -= 1
+        return result
+
+    def extend(self, items):
+        for i in items:
+            self.counts[i] += 1
+        self.backing.extend(items)
+        self.length += len(items)
+
+    def __iter__(self):
+        rem = self.removed.copy()
+        for item in self.backing:
+            if rem[item]:
+                rem[item] -= 1
+                continue
+            yield item
+
+    def __contains__(self, item):
+        return self.counts[item] > 0
+
+    def __len__(self):
+        return self.length
+    
+
+class CircularList(list):
+    def __init__(self):
+        super().__init__()
+        self.index = 0
+        self.limit = 0
+        self.count = 0
+    
+    def append(self, item):
+        super().append(item)
+        self.limit += 1
+        self.count += 1
+
+    def pop(self):
+        if self.index >= self.limit:
+            raise IndexError()
+
+        result = self[self.index % len(self)]
+        self.index += 1
+        return result
+    
+    def raise_limit(self, count):
+        self.limit += count
+
+
+
+# finds cycles greedily
 def point_lists_to_shapes(point_lists: List[Tuple[list, str]]) -> Dict[str, List[list]]:
     """Join point lists and fill style IDs into shapes.
 
@@ -343,52 +424,304 @@ def point_lists_to_shapes(point_lists: List[Tuple[list, str]]) -> Dict[str, List
     Returns:
         {fill style ID: [shape point list, ...], ...}
     """
-    graph = defaultdict(lambda: defaultdict(list))
+    graph = defaultdict(lambda: defaultdict(CircularList))
     shapes = defaultdict(list)
-    points = defaultdict(set)
+    points = defaultdict(FasterList)
 
-    for point_list, fill_id in point_lists:
+    # The SVG is sensitive about the exact cycles used to create shapes. I don't know
+    # why. It could be because of some issue with control points. If that's true, then
+    # this code can be vastly simplified by using the get_cycles() function below after
+    # figuring out how to make it handle control points properly.
+    
+    # Without the tree algorithm, it seems to work to try checking paths greedily, as
+    # long as the path graph is set up properly. The order of vertices and edges
+    # checked both matter.
+
+    for point_list, fill_id in point_lists[::-1]:
         for source, target in zip(point_list[:-1], point_list[1:]):
             graph[fill_id][source].append(target)
         for point in point_list:
             # Ignore control points since we don't want paths to start or end with
             # them. They'll automatically get added to paths if they're needed.
             if not isinstance(point, tuple):
-                points[fill_id].add(point)
+                points[fill_id].append(point)
 
     for fill_id in points:
         unused_edges = graph[fill_id]
-        unused_points = points[fill_id]
+        pending_assignments = points[fill_id]
         generated_shapes = shapes[fill_id]
 
+        unused_points = set(pending_assignments)
+
         # Make sure all non-control points get assigned to at least one shape.
-        while unused_points:
-            start = unused_points.pop()
+        while pending_assignments:
+            start = pending_assignments.pop()
+
+            if not unused_edges[start]:
+                continue
 
             edge = unused_edges[start].pop()
             next_shape = [start, edge]
-            discovered_points = set()
+            # Keep track of non-start points found while looking for a shape so we
+            # can undo if needed
+            discovered_points = OrderedDict()
 
             try:
                 while edge != start:
-                    if edge in unused_points:
+                    if edge in pending_assignments:
                         # Mark this point as assigned to a shape.
-                        unused_points.remove(edge)
-                        discovered_points.add(edge)
-
+                        pending_assignments.remove(edge)
+                        discovered_points[edge] = None
+                    
                     edge = unused_edges[edge].pop()
                     next_shape.append(edge)
-
+                
                 generated_shapes.append(next_shape)
+                unused_points.difference_update(next_shape)
             except IndexError:
-                # Undo since we failed to find a cycle.
-                unused_points.update(discovered_points)
-                for source, target in zip(next_shape[:-1], next_shape[1:]):
-                    unused_edges[source].append(target)
-                # Log the failure so we can come back to it later.
-                warnings.warn("Failed to find an edge cycle.")
+                # Undo since we failed to find a cycle. Don't append the start since
+                # we know it's a bad starting point.
+                pending_assignments.extend(discovered_points.keys())
+            
+            for source, target in zip(next_shape[:-1], next_shape[1:]):
+                unused_edges[source].raise_limit(1)
+        
+        if unused_points:
+            warnings.warn("Failed to assign all points to a shape")
+            print('failed on', len(unused_points), 'points')
 
     return shapes
+
+
+
+
+# finds cycles using spanning trees
+# def point_lists_to_shapes(point_lists: List[Tuple[list, str]]) -> Dict[str, List[list]]:
+#     """Join point lists and fill style IDs into shapes.
+
+#     Args:
+#         point_lists: [(point_list, fill style ID), ...]
+
+#     Returns:
+#         {fill style ID: [shape point list, ...], ...}
+#     """
+#     graph = defaultdict(lambda: defaultdict(list))
+#     shapes = defaultdict(list)
+#     points = defaultdict(set)
+#     controls = defaultdict(dict)
+
+#     for point_list, fill_id in point_lists:
+#         i = 0
+#         while i < len(point_list)-1:
+#             source = point_list[i]
+#             if isinstance(point_list[i+1], tuple):
+#                 control = point_list[i+1]
+#                 target = point_list[i+2]
+#                 print('setting control point')
+#                 controls[fill_id][(source, target)] = control
+#                 i += 2
+#             else:
+#                 target = point_list[i+1]
+#                 i += 1
+            
+#             graph[fill_id][source].append(target)
+#             points[fill_id].add(source)
+#             points[fill_id].add(target)
+
+#     for fill_id in points:
+#         unused_edges = graph[fill_id]
+#         unused_points = points[fill_id]
+#         generated_shapes = shapes[fill_id]
+
+#         # Make sure all non-control points get assigned to at least one shape.
+#         while unused_points:
+#             start = unused_points.pop()
+#             cycle = get_cycle(graph[fill_id], start)
+#             shape = []
+#             for source, target in zip(cycle[:-1], cycle[1:]):
+#                 shape.append(source)
+#                 if (source, target) in controls[fill_id]:
+#                     print('found control point')
+#                     shape.append(controls[fill_id][(source, target)])
+#             shape.append(target)
+
+#             unused_points.difference_update(cycle)
+#             generated_shapes.append(shape)
+
+
+
+#     return shapes
+
+
+# @dataclass(frozen=False)
+# class SCCParams:
+#     components: Set
+#     s: List
+#     p: List
+#     counter: int
+#     preorders: Dict
+#     unassigned: Set
+#     assignments: Dict
+
+#     @classmethod
+#     def new_instance(cls, graph):
+#         unassigned = set(graph.keys())
+#         for v in graph.values():
+#             unassigned.update(v)
+#         return cls(set(), [], [], 0, {}, unassigned)
+
+
+# def graph_to_scc(graph, v=None, params=None):
+#     if not graph:
+#         return []
+#     if params == None:
+#         params = SCCParams.new_instance(graph)
+#     if v == None:
+#         while params.unassigned:
+#             v = next(iter(params.unassigned))
+#             graph_to_scc(graph, v, params)
+#         return params.components, params.assignments
+#     params.preorders[v] = params.counter
+#     params.counter += 1
+#     params.s.append(v)
+#     params.p.append(v)
+#     if v in graph:
+#         for w in graph[v]:
+#             if w not in params.preorders:
+#                 graph_to_scc(graph, w, params)
+#             elif w in params.unassigned:
+#                 while params.preorders[params.p[-1]] > params.preorders[w]:
+#                     params.p.pop()
+#     if params.p[-1] == v:
+#         new_component = set()
+#         params.components.add(new_component)
+#         while params.s[-1] != v:
+#             next_vertex = params.s.pop()
+#             params.unassigned.remove(next_vertex)
+#             new_component.add(next_vertex)
+#             params.assignments[next_vertex] = new_component
+#         params.unassigned.remove(v)
+#         new_component.add(params.s.pop())
+#         params.assignments[v] = new_component
+#         params.p.pop()
+
+
+
+# def get_cycle(graph, v):
+#     """ Find a cycle by building a spanning tree.
+
+#     This function builds a spanning tree rooted in vertex v until it hits v again. It
+#     then returns the discovered path from v to v.
+#     """
+#     parents = {}
+#     pending = set()
+
+#     for child in graph[v]:
+#         parents[child] = v
+#         pending.add(child)
+
+#     while pending:
+#         curr_vertex = pending.pop()
+#         if curr_vertex == v:
+#             break
+
+#         for child in graph[curr_vertex]:
+#             if child in parents:
+#                 continue
+#             parents[child] = curr_vertex
+#             pending.add(child)
+    
+#     if v not in parents:
+#         # Exhausted all possibilities without finding a cycle.
+#         return []
+
+#     result = [v]
+#     next_node = parents[v]
+#     while next_node != v:
+#         result.insert(0, next_node)
+#         next_node = parents[next_node]
+    
+#     return result
+
+
+# class EdgeGraph:
+#     """ This class represents a graph of edges.
+
+#     Each edge is represented as a pair (source, target) with associated hashable data.
+#     There exists an EdgeGraph edge from A to B is A's target is the same as B's source.
+
+#     This class is used to find a set of cycles that covers all given edges.    
+#     """
+
+#     def __init__(self):
+#         # Standard graph data
+#         self.vertices = set()
+#         self.edges = defaultdict(set)
+
+#         # Vertices "behind" a given target node
+#         self.tails = defaultdict(set)
+#         # Vertices "in front of" a given source node
+#         self.heads = defaultdict(set)
+
+#     def add(self, source, target, data=None):
+#         vertex = (source, target, data)
+#         self.vertices.add(vertex)
+
+#         self.heads[source].add(vertex)
+#         self.tails[target].add(vertex)
+        
+#         for incoming in self.tails[source]:
+#             self.edges[incoming].add(vertex)
+        
+#         for outgoing in self.heads[target]:
+#             self.edges[vertex].add(outgoing)
+        
+    
+#     def covering_cycles(self):
+#         # Make sure every edge (vertex in the EdgeGraph) gets used at least once
+#         pending = self.vertices.copy()
+
+#         while pending:
+#             start = pending.pop()
+#             cycle = get_cycle(self.edges, start)
+#             if not cycle:
+#                 continue
+            
+#             yield cycle
+#             for v in cycle:
+#                 if v in pending:
+#                     pending.remove(v)
+
+
+# def point_lists_to_shapes(point_lists: List[Tuple[list, str]]) -> Dict[str, List[list]]:
+#     """Join point lists and fill style IDs into shapes.
+
+#     Args:
+#         point_lists: [(point_list, fill style ID), ...]
+
+#     Returns:
+#         {fill style ID: [shape point list, ...], ...}
+#     """
+#     graphs = defaultdict(EdgeGraph)
+#     shapes = defaultdict(list)
+    
+#     for point_list, fill_id in point_lists:
+#         g = graphs[fill_id]
+#         g.add(point_list[0], point_list[-1], tuple(point_list))
+
+#     for fill_id, g in graphs.items():
+#         for cycle in g.covering_cycles():
+#             next_shape = []
+#             for _, _, path in cycle:
+#                 next_shape.extend(path)
+
+#             shapes[fill_id].append(next_shape)
+
+#     return shapes
+
+        
+
+
 
 
 def xfl_edge_to_shapes(
