@@ -100,6 +100,7 @@ class RadialGradient:
         focal_point = float(element.get("focalPointRatio", 0)) * radius
 
         norm = (a**2 + b**2) ** 0.5
+        radius = 16384/20 * norm
         if norm == 0:
             svg_matrix = ('NaN', 'NaN', 'NaN', 'NaN')
         else:
