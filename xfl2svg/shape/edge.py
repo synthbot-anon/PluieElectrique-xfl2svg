@@ -113,8 +113,8 @@ def line_bounding_box(p1, p2):
 
 
 def quadratic_bezier(p1, p2, p3, t):
-    x = (1 - t) * ((1 - t) * p1[0] + t * p2[0]) + t * ((1 - t) * p2[0] + p3[0])
-    y = (1 - t) * ((1 - t) * p1[1] + t * p2[1]) + t * ((1 - t) * p2[1] + p3[1])
+    x = (1 - t) * ((1 - t) * p1[0] + t * p2[0]) + t * ((1 - t) * p2[0] + t * p3[0])
+    y = (1 - t) * ((1 - t) * p1[1] + t * p2[1]) + t * ((1 - t) * p2[1] + t * p3[1])
     return (x, y)
 
 
@@ -247,7 +247,7 @@ def edge_format_to_point_lists(edges: str) -> Iterator[list]:
                     yield point_list, bounding_box
                     point_list = []
                     prev_point = curr_point
-                    bounding_box = None
+                    bounding_box = [*curr_point, *curr_point]
             elif command in "|/":
                 # Line to
                 point_list.append(f"{prev_point[0]} {prev_point[1]}")
