@@ -42,19 +42,24 @@ def parse_fill_style(style, bounding_box):
         attrib: Dict of SVG style attributes
         extra_defs: Dict of {element_id: SVG element to put in <defs>}
     """
-    attrib = {"stroke": "none"}
-    extra_defs = {}
+    # attrib = {"stroke": "none"}
+    # extra_defs = {}
+    attrib, extra_defs = parse_stroke_style(style, bounding_box)
+    attrib["stroke-width"] = "0.05"
 
     if style.tag.endswith("SolidColor"):
         update(attrib, ("fill", "fill-opacity"), parse_solid_color(style))
+        update(attrib, ("stroke", "stroke-opacity"), parse_solid_color(style))
     elif style.tag.endswith("LinearGradient"):
         gradient = LinearGradient.from_xfl(style)
         attrib["fill"] = f"url(#{gradient.id})"
+        attrib["stroke"] = f"url(#{gradient.id})"
         extra_defs[gradient.id] = gradient.to_svg()
     elif style.tag.endswith("RadialGradient"):
         radius = get_radius(bounding_box)
         gradient = RadialGradient.from_xfl(style, radius)
         attrib["fill"] = f"url(#{gradient.id})"
+        attrib["stroke"] = f"url(#{gradient.id})"
         extra_defs[gradient.id] = gradient.to_svg()
     else:
         warnings.warn(f"Unknown fill style: {xml_str(style)}")
