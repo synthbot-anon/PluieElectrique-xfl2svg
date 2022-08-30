@@ -76,7 +76,7 @@ def parse_stroke_style(style, bounding_box):
         warnings.warn(f"Unknown stroke style: {xml_str(style)}")
         return {"fill": "none"}, {}
 
-    check_known_attrib(style, {"scaleMode", "weight", "joints", "miterLimit", "caps", "solidStyle", "pixelHinting"})
+    check_known_attrib(style, {"scaleMode", "weight", "joints", "miterLimit", "caps", "solidStyle", "pixelHinting", "sharpCorners"})
     if style.get("scaleMode") != "normal":
         warnings.warn(f"Unknown `scaleMode` value: {style.get('scaleMode')}")
         # return {"fill": "none"}, {}
