@@ -73,10 +73,11 @@ def parse_stroke_style(style, bounding_box):
     Returns a dict of SVG style attributes.
     """
     if not style.tag.endswith("SolidStroke"):
-        warnings.warn(f"Unknown stroke style: {xml_str(style)}")
-        return {"fill": "none"}, {}
+        if not style.tag.endswith("RadialGradient"): # TODO?
+            warnings.warn(f"Unknown stroke style: {xml_str(style)}")
+            return {"fill": "none"}, {}
 
-    check_known_attrib(style, {"scaleMode", "weight", "joints", "miterLimit", "caps", "solidStyle", "pixelHinting", "sharpCorners"})
+    check_known_attrib(style, {"scaleMode", "weight", "joints", "miterLimit", "caps", "solidStyle", "pixelHinting", "sharpCorners", "focalPointRatio", 'spreadMethod', 'interpolationMethod'})
     if style.get("scaleMode") != "normal":
         warnings.warn(f"Unknown `scaleMode` value: {style.get('scaleMode')}")
         # return {"fill": "none"}, {}
@@ -119,6 +120,8 @@ def parse_stroke_style(style, bounding_box):
         extra_defs[gradient.id] = gradient.to_svg()
     elif fill.tag.endswith("SolidColor"):
         update(attrib, ("stroke", "stroke-opacity"), parse_solid_color(fill))
+    elif fill.tag.endswith("LinearGradient"):
+        pass # TODO
     else:
         warnings.warn(f"Unknown stroke fill: {xml_str(fill)}")
         return attrib, extra_defs

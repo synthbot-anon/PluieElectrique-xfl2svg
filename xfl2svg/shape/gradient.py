@@ -120,8 +120,9 @@ class RadialGradient:
                     entry.get("alpha"),
                 )
             )
-
-        check_known_attrib(element, {"spreadMethod", "focalPointRatio"})
+        
+        # TODO: interpolationMethod
+        check_known_attrib(element, {"spreadMethod", "focalPointRatio", "interpolationMethod"})
         spread_method = element.get("spreadMethod", "pad")
 
         return cls(svg_matrix, radius, focal_point, tuple(stops), spread_method)
