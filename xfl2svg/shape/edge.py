@@ -38,16 +38,10 @@ in how everything works, read on.
 #    <path> element, and assign fill/stroke style attributes to the <path>.
 
 
-from collections import defaultdict, OrderedDict
-from dataclasses import dataclass
-from email.policy import default
-import math
+from collections import defaultdict
 import re
-from typing import Dict, Iterator, List, Set, Tuple
-import warnings
+from typing import Iterator, List, Tuple
 import xml.etree.ElementTree as ET
-
-from xfl2svg.util import merge_bounding_boxes
 
 
 # The XFL edge format can be described as follows:
@@ -106,57 +100,6 @@ def parse_number(num: str) -> float:
     else:
         # Decimal number. Account for Animate's 20x scaling (twips)
         return float(num) / 20
-
-
-def line_bounding_box(p1, p2):
-    return (min(p1[0], p2[0]), min(p1[1], p2[1]), max(p1[0], p2[0]), max(p1[1], p2[1]))
-
-
-def quadratic_bezier(p1, p2, p3, t):
-    x = (1 - t) * ((1 - t) * p1[0] + t * p2[0]) + t * ((1 - t) * p2[0] + t * p3[0])
-    y = (1 - t) * ((1 - t) * p1[1] + t * p2[1]) + t * ((1 - t) * p2[1] + t * p3[1])
-    return (x, y)
-
-
-def quadratic_critical_points(p1, p2, p3):
-    x_denom = p1[0] - 2 * p2[0] + p3[0]
-    if x_denom == 0:
-        x_crit = math.inf
-    else:
-        x_crit = (p1[0] - p2[0]) / x_denom
-
-    y_denom = p1[1] - 2 * p2[1] + p3[1]
-    if y_denom == 0:
-        y_crit = math.inf
-    else:
-        y_crit = (p1[1] - p2[1]) / y_denom
-
-    return x_crit, y_crit
-
-
-def quadratic_bounding_box(p1, control, p2):
-    t3, t4 = quadratic_critical_points(p1, control, p2)
-
-    if t3 > 0 and t3 < 1:
-        p3 = quadratic_bezier(p1, control, p2, t3)
-    else:
-        # Pick either the start or end of the curve arbitrarily so it doesn't affect
-        # the max/min point calculation
-        p3 = p1
-
-    if t4 > 0 and t4 < 1:
-        p4 = quadratic_bezier(p1, control, p2, t4)
-    else:
-        # Pick either the start or end of the curve arbitrarily so it doesn't affect
-        # the max/min point calculation
-        p4 = p1
-
-    return (
-        min(p1[0], p2[0], p3[0], p4[0]),
-        min(p1[1], p2[1], p3[1], p4[1]),
-        max(p1[0], p2[0], p3[0], p4[0]),
-        max(p1[1], p2[1], p3[1], p4[1]),
-    )
 
 
 # Notes:
@@ -231,7 +174,6 @@ def edge_format_to_point_lists(edges: str) -> Iterator[list]:
     assert next(tokens) == "!", "Edge format must start with moveto (!) command"
 
     prev_point = next_point()
-    bounding_box = [*prev_point, *prev_point]
 
     try:
         while True:
@@ -244,234 +186,39 @@ def edge_format_to_point_lists(edges: str) -> Iterator[list]:
                     # If a move command doesn't change the current point, we
                     # ignore it. Otherwise, a new segment is starting, so we
                     # must yield the current point list and begin a new one.
-                    yield point_list, bounding_box
+                    yield point_list
                     point_list = []
                     prev_point = curr_point
-                    bounding_box = [*curr_point, *curr_point]
             elif command in "|/":
                 # Line to
-                point_list.append(f"{prev_point[0]} {prev_point[1]}")
-                point_list.append(f"{curr_point[0]} {curr_point[1]}")
-                bounding_box = merge_bounding_boxes(
-                    bounding_box, line_bounding_box(prev_point, curr_point)
-                )
+                point_list.append((prev_point[0], prev_point[1]))
+                point_list.append((curr_point[0], curr_point[1]))
                 prev_point = curr_point
             else:
                 # Quad to. The control point (curr_point) is marked by putting
                 # it in a tuple.
                 end_point = next_point()
-                point_list.append(f"{prev_point[0]} {prev_point[1]}")
-                point_list.append((f"{curr_point[0]} {curr_point[1]}",))
-                point_list.append(f"{end_point[0]} {end_point[1]}")
-                bounding_box = merge_bounding_boxes(
-                    bounding_box,
-                    quadratic_bounding_box(prev_point, curr_point, end_point),
-                )
+                point_list.append((prev_point[0], prev_point[1]))
+                point_list.append(((curr_point[0], curr_point[1]),))
+                point_list.append((end_point[0], end_point[1]))
                 prev_point = end_point
     except StopIteration:
-        yield point_list, bounding_box
-        bounding_box = None
+        yield point_list
 
 
-# Finally, we can convert XFL <Edge> elements into SVG <path> elements. The
-# algorithm works as follows:
-
-#   First, convert the "edges" attributes into segments. Then:
-#
-#   For filled shapes:
-#     * For a given <Edge>, process each of its segments:
-#         * If the <Edge> has "fillStyle0", associate the fill style ID
-#           ("index" in XFL) with the segment.
-#         * If the <Edge> has "fillStyle1", associate the ID with the segment,
-#           reversed. This way, the fill of the shape is always to the left of
-#           the segment (arbitrary choice--the opposite works too).
-#     * For each fill style ID, consider its segments:
-#         * Pick an unused segment. If it's already closed (start point equals
-#           end point), convert it to the SVG path format.
-#         * Otherwise, if it's open, randomly append segments (making sure to
-#           match start and end points) until:
-#             1. The segment is closed. Convert and start over with a new,
-#                unused segment.
-#             2. The segment intersects with itself (i.e. the current end point
-#                equals the end point of a previous segment). Backtrack.
-#             3. There are no more valid segments. Backtrack.
-#         * When all segments have been joined into shapes and converted,
-#           concatenate the path strings and put them in *one* SVG <path>
-#           element. (This ensures that holes work correctly.) Finally, look up
-#           the fill attributes from the ID and assign them to the <path>.
-#
-#   For stroked paths:
-#     * Pair up segments with their stroke style IDs. There is only one
-#       "strokeStyle" attribute, so we don't need to reverse any segments.
-#     * For each stroke style ID, convert its segments into the SVG path
-#       format. Concatenate all path strings and put them in an SVG <path>
-#       element. Look up the stroke attributes and assign them to the <path>.
-#
-#
-# This algorithm is split across the next two functions:
-#   * `point_lists_to_shapes()` joins point lists into filled shapes.
-#   * `xfl_edge_to_svg_path()` does everything else.
-#
-#
-# Assumptions:
-#   * Segments never cross. So, we only need to join them at their ends.
-#   * For filled shapes, there's only one way to join segments such that no
-#     segment is left out. So, we don't need to worry about making the wrong
-#     decision when there are multiple segments to pick from.
-#
-# Notes:
-#   * For stroked paths, Animate joins together segments by their start/end
-#     points. But, this isn't necessary: when converting to the SVG path
-#     format, each segment starts with a "move to" command, so they can be
-#     concatenated in any order.
-#   * For filled shapes, there is usually only one choice for the next point
-#     list. The only time there are multiple choices is when multiple shapes
-#     share a point:
-#
-#               +<-----+
-#      Shape 1  |      ^
-#               v      |
-#               +----->o<-----+
-#                      |      ^  Shape 2
-#                      v      |
-#                      +----->+
-
-
-class EdgeGraph:
-    """This class represents a graph of edges.
-
-    Each edge is represented as a pair (source, target) with associated hashable data.
-    There exists an EdgeGraph edge from A to B is A's target is the same as B's source.
-
-    This class is used to find a set of cycles that covers all given edges.
-    """
-
-    def __init__(self):
-        # Standard graph data
-        self.vertices = set()
-        self.edges = defaultdict(set)
-
-        # Vertices "behind" a given target node
-        self.tails = defaultdict(set)
-        # Vertices "in front of" a given source node
-        self.heads = defaultdict(set)
-
-    def add(self, source, target, data=None):
-        vertex = (source, target, data)
-        self.vertices.add(vertex)
-
-        self.heads[source].add(vertex)
-        self.tails[target].add(vertex)
-
-        for incoming in self.tails[source]:
-            self.edges[incoming].add(vertex)
-
-        for outgoing in self.heads[target]:
-            self.edges[vertex].add(outgoing)
-
-    def get_cycle(self, v):
-        """Find a cycle by building a spanning tree.
-
-        This function builds a spanning tree rooted in vertex v until it hits v again. It
-        then returns the discovered path from v to v.
-        """
-        parents = {}
-        pending = set()
-
-        for child in self.edges[v]:
-            parents[child] = v
-            pending.add(child)
-
-        while pending:
-            curr_vertex = pending.pop()
-            if curr_vertex == v:
-                break
-
-            for child in self.edges[curr_vertex]:
-                if child in parents:
-                    continue
-                parents[child] = curr_vertex
-                pending.add(child)
-
-        if v not in parents:
-            # Exhausted all possibilities without finding a cycle.
-            return []
-
-        result = [v]
-        next_node = parents[v]
-        while next_node != v:
-            result.insert(0, next_node)
-            next_node = parents[next_node]
-
-        return result
-
-    def covering_cycles(self):
-        # Make sure every edge (vertex in the EdgeGraph) gets used at least once
-        pending = self.vertices.copy()
-
-        while pending:
-            start = pending.pop()
-            cycle = self.get_cycle(start)
-            if not cycle:
-                continue
-
-            yield cycle
-            for v in cycle:
-                if v in pending:
-                    pending.remove(v)
-
-
-def point_lists_to_shapes(point_lists: List[Tuple[list, str]]) -> Dict[str, List[list]]:
-    """Join point lists and fill style IDs into shapes.
+def xfl_domshape_to_edges(domshape: ET.Element) -> List[Tuple]:
+    """Convert the XFL <DOMShape> element into edges (path + color data).
 
     Args:
-        point_lists: [(point_list, fill style ID), ...]
+        domshape: The <DOMShape> element
 
-    Returns:
-        {fill style ID: [shape point list, ...], ...}
-    """
-    graphs = defaultdict(EdgeGraph)
-    shapes = defaultdict(list)
-
-    for point_list, fill_id in point_lists:
-        g = graphs[fill_id]
-        g.add(point_list[0], point_list[-1], tuple(point_list))
-
-    for fill_id, g in graphs.items():
-        for cycle in g.covering_cycles():
-            next_shape = []
-            for _, _, path in cycle:
-                next_shape.extend(path)
-
-            shapes[fill_id].append(next_shape)
-
-    return shapes
-
-        
-
-
-
-
-def xfl_edge_to_shapes(
-    edges_element: ET.Element,
-    fill_styles: Dict[str, dict],
-    stroke_styles: Dict[str, dict],
-) -> Tuple[List[ET.Element], List[ET.Element]]:
-    """Convert the XFL <edges> element into SVG <path> elements.
-
-    Args:
-        edges_element: The <edges> element of a <DOMShape>
-        fill_styles: {fill style ID: style attribute dict, ...}
-        stroke_styles: {stroke style ID: style attribute dict, ...}
-
-    Returns a tuple of lists, each containing <path> elements:
-        ([filled path, ...], [stroked path, ...])
+    Returns a list of tuples, each containing a path, left fill, right fill, and stroke:
+        [(path, fill_id_left, fill_id_right, stroke_id), ...]
     """
     fill_edges = []
     stroke_edges = []
     stroke_paths = defaultdict(list)
-    fill_boxes = defaultdict(lambda: None)
-    stroke_boxes = defaultdict(lambda: None)
+    edges_element = domshape.find("{*}edges")
 
     # Ignore the "cubics" attribute, as it's only used by Animate
     for edge in edges_element.iterfind(".//{*}Edge[@edges]"):
@@ -480,32 +227,5 @@ def xfl_edge_to_shapes(
         fill_id_right = edge.get("fillStyle1")
         stroke_id = edge.get("strokeStyle")
 
-        for point_list, bounding_box in edge_format_to_point_lists(edge_format):
-            # Reverse point lists so that the fill is always to the left
-            if fill_id_left is not None:
-                fill_edges.append((point_list, fill_id_left))
-                fill_boxes[fill_id_left] = merge_bounding_boxes(
-                    fill_boxes[fill_id_left], bounding_box
-                )
-            if fill_id_right is not None:
-                fill_edges.append((list(reversed(point_list)), fill_id_right))
-                fill_boxes[fill_id_right] = merge_bounding_boxes(
-                    fill_boxes[fill_id_right], bounding_box
-                )
-
-            # We don't need to join anything into shapes
-            if stroke_id is not None and stroke_id in stroke_styles:
-                stroke_paths[stroke_id].append(point_list)
-                stroke_boxes[stroke_id] = merge_bounding_boxes(
-                    stroke_boxes[stroke_id], bounding_box
-                )
-
-    fill_result = {}
-    for fill_id, fill_shape in point_lists_to_shapes(fill_edges).items():
-        fill_result[fill_id] = (fill_shape, fill_boxes[fill_id])
-
-    stroke_result = {}
-    for stroke_id, stroke_path in stroke_paths.items():
-        stroke_result[stroke_id] = (stroke_path, stroke_boxes[stroke_id])
-
-    return fill_result, stroke_result
+        for path in edge_format_to_point_lists(edge_format):
+            yield tuple(path), fill_id_left, fill_id_right, stroke_id

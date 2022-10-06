@@ -35,52 +35,66 @@ def get_radius(bounding_box):
     return (width**2 + height**2) ** 0.5 / 2
 
 
-def parse_fill_style(style, bounding_box):
+def parse_fill_style(style):
     """Parse an XFL <FillStyle> element.
 
     Returns a tuple:
         attrib: Dict of SVG style attributes
         extra_defs: Dict of {element_id: SVG element to put in <defs>}
     """
-    # attrib = {"stroke": "none"}
+    attrib = {"stroke": "none"}
     # extra_defs = {}
-    attrib, extra_defs = parse_stroke_style(style, bounding_box)
-    attrib["stroke-width"] = "0.05"
+    # attrib, extra_defs = parse_stroke_style(style, bounding_box)
+    # attrib["stroke-width"] = "0.05"
 
     if style.tag.endswith("SolidColor"):
         update(attrib, ("fill", "fill-opacity"), parse_solid_color(style))
         update(attrib, ("stroke", "stroke-opacity"), parse_solid_color(style))
     elif style.tag.endswith("LinearGradient"):
         gradient = LinearGradient.from_xfl(style)
-        attrib["fill"] = f"url(#{gradient.id})"
-        attrib["stroke"] = f"url(#{gradient.id})"
-        extra_defs[gradient.id] = gradient.to_svg()
+        attrib["fill"] = gradient  # f"url(#{gradient.id})"
+        # attrib["stroke"] = f"url(#{gradient.id})"
+        # extra_defs[gradient.id] = gradient.to_svg()
     elif style.tag.endswith("RadialGradient"):
-        radius = get_radius(bounding_box)
-        gradient = RadialGradient.from_xfl(style, radius)
-        attrib["fill"] = f"url(#{gradient.id})"
-        attrib["stroke"] = f"url(#{gradient.id})"
-        extra_defs[gradient.id] = gradient.to_svg()
+        gradient = RadialGradient.from_xfl(style)
+        attrib["fill"] = gradient  # f"url(#{gradient.id})"
+        # attrib["stroke"] = f"url(#{gradient.id})"
+        # extra_defs[gradient.id] = gradient.to_svg()
     else:
         warnings.warn(f"Unknown fill style: {xml_str(style)}")
 
-    return attrib, extra_defs
+    return attrib
 
 
-def parse_stroke_style(style, bounding_box):
+def parse_stroke_style(style):
     """Parse an XFL <StrokeStyle> element.
 
     Returns a dict of SVG style attributes.
     """
     if not style.tag.endswith("SolidStroke"):
-        if not style.tag.endswith("RadialGradient"): # TODO?
+        if not style.tag.endswith("RadialGradient"):  # TODO?
             warnings.warn(f"Unknown stroke style: {xml_str(style)}")
-            return {"fill": "none"}, {}
+            return {"fill": "none"}
 
-    check_known_attrib(style, {"scaleMode", "weight", "joints", "miterLimit", "caps", "solidStyle", "pixelHinting", "sharpCorners", "focalPointRatio", 'spreadMethod', 'interpolationMethod'})
+    check_known_attrib(
+        style,
+        {
+            "scaleMode",
+            "weight",
+            "joints",
+            "miterLimit",
+            "caps",
+            "solidStyle",
+            "pixelHinting",
+            "sharpCorners",
+            "focalPointRatio",
+            "spreadMethod",
+            "interpolationMethod",
+        },
+    )
     if style.get("scaleMode") != "normal":
         warnings.warn(f"Unknown `scaleMode` value: {style.get('scaleMode')}")
-        # return {"fill": "none"}, {}
+        return {"fill": "none"}
 
     cap = style.get("caps", "round")
     if cap == "none":
@@ -92,7 +106,7 @@ def parse_stroke_style(style, bounding_box):
         "stroke-linejoin": style.get("joints", "round"),
         "fill": "none",
     }
-    extra_defs = {}
+    # extra_defs = {}
 
     solid = style.get("solidStyle")
     if solid:
@@ -100,9 +114,8 @@ def parse_stroke_style(style, bounding_box):
             warnings.warn(f"Unknown `solidStyle` value: {style.get('solidStyle')}")
         else:
             # A hairline solidStyle overrides the 'weight' attribute.
-            attrib['stroke-width'] = "0.05"
-    
-    
+            attrib["stroke-width"] = "0.05"
+
     if attrib["stroke-linejoin"] == "miter":
         # If the XFL does not specify a miterLimit, Animate's SVG exporter will
         # set stroke-miterlimit to 3. This seems to match what Flash does [*].
@@ -114,16 +127,37 @@ def parse_stroke_style(style, bounding_box):
 
     fill = style[0][0]
     if fill.tag.endswith("RadialGradient"):
-        radius = get_radius(bounding_box)
-        gradient = RadialGradient.from_xfl(fill, radius)
-        attrib["stroke"] = f"url(#{gradient.id})"
-        extra_defs[gradient.id] = gradient.to_svg()
+        gradient = RadialGradient.from_xfl(fill)
+        attrib["stroke"] = gradient  # f"url(#{gradient.id})"
+        # extra_defs[gradient.id] = gradient.to_svg()
     elif fill.tag.endswith("SolidColor"):
         update(attrib, ("stroke", "stroke-opacity"), parse_solid_color(fill))
     elif fill.tag.endswith("LinearGradient"):
-        pass # TODO
+        pass  # TODO
     else:
         warnings.warn(f"Unknown stroke fill: {xml_str(fill)}")
-        return attrib, extra_defs
+        return attrib
 
-    return attrib, extra_defs
+    return attrib
+
+
+def parse_json_style(style):
+    result = {}
+    for key, value in style.items():
+        if not isinstance(value, dict):
+            result[key] = value
+            continue
+
+        if len(value) != 1:
+            result[key] = value
+            continue
+
+        if "radialGradient" in value:
+            result[key] = RadialGradient.from_dict(value)
+            continue
+
+        if "linearGradient" in value:
+            result[key] = LinearGradient.from_dict(value)
+            continue
+
+    return result

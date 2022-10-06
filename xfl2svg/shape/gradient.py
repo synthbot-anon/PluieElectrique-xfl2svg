@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from typing import List, Tuple
 import xml.etree.ElementTree as ET
 
-from xfl2svg.util import check_known_attrib, get_matrix
+from xfl2svg.util import check_known_attrib, get_matrix, Traceable
 
 
 @dataclass(frozen=True)
-class LinearGradient:
+class LinearGradient(Traceable):
     start: Tuple[float, float]
     end: Tuple[float, float]
     stops: Tuple[Tuple[float, str, str], ...]
@@ -50,7 +50,7 @@ class LinearGradient:
                 (
                     float(entry.get("ratio")) * 100,
                     entry.get("color", "#000000"),
-                    entry.get("alpha"),
+                    float(entry.get("alpha") or 1),
                 )
             )
 
@@ -58,6 +58,20 @@ class LinearGradient:
         spread_method = element.get("spreadMethod", "pad")
 
         return cls(start, end, tuple(stops), spread_method)
+
+    @classmethod
+    def from_dict(cls, d):
+        params = d["linearGradient"]
+        stops = []
+        for d in params["stop"]:
+            stops.append((d["offset"], d["stop-color"], d["stop-opacity"]))
+
+        return LinearGradient(
+            (params["x1"], params["y1"]),
+            (params["x2"], params["y2"]),
+            tuple(stops),
+            params["spreadMethod"],
+        )
 
     def to_svg(self):
         """Create an SVG <linearGradient> element from a LinearGradient."""
@@ -75,10 +89,32 @@ class LinearGradient:
         )
         for offset, color, alpha in self.stops:
             attrib = {"offset": f"{offset}%", "stop-color": color}
-            if alpha is not None:
-                attrib["stop-opacity"] = alpha
+            if alpha != 1:
+                attrib["stop-opacity"] = str(alpha)
             ET.SubElement(element, "stop", attrib)
         return element
+
+    def to_dict(self):
+        result = {
+            "linearGradient": {
+                "x1": self.start[0],
+                "y1": self.start[1],
+                "x2": self.end[0],
+                "y2": self.end[1],
+                "spreadMethod": self.spread_method,
+                "stop": [],
+            }
+        }
+
+        for offset, color, alpha in self.stops:
+            attrib = {"offset": offset, "stop-color": color}
+            if alpha is not None:
+                attrib["stop-opacity"] = alpha
+            else:
+                attrib["stop-opacity"] = 1
+            result["linearGradient"]["stop"].append(attrib)
+
+        return result
 
     @property
     def id(self):
@@ -87,7 +123,7 @@ class LinearGradient:
 
 
 @dataclass(frozen=True)
-class RadialGradient:
+class RadialGradient(Traceable):
     matrix: Tuple[float, ...]
     radius: float
     focal_point: float
@@ -95,14 +131,16 @@ class RadialGradient:
     spread_method: str
 
     @classmethod
-    def from_xfl(cls, element, radius):
+    def from_xfl(cls, element):
         a, b, c, d, tx, ty = map(float, get_matrix(element))
+        norm = (a**2 + b**2) ** 0.5
+        radius = 16384 / 20 * norm
+
+        # NOTE: this might require radius as calculated from the bounding box
         focal_point = float(element.get("focalPointRatio", 0)) * radius
 
-        norm = (a**2 + b**2) ** 0.5
-        radius = 16384/20 * norm
         if norm == 0:
-            svg_matrix = ('NaN', 'NaN', 'NaN', 'NaN')
+            svg_matrix = ("NaN", "NaN", "NaN", "NaN")
         else:
             svg_a = a / norm
             svg_b = b / norm
@@ -117,15 +155,34 @@ class RadialGradient:
                 (
                     float(entry.get("ratio")) * 100,
                     entry.get("color", "#000000"),
-                    entry.get("alpha"),
+                    float(entry.get("alpha") or 1),
                 )
             )
-        
+
         # TODO: interpolationMethod
-        check_known_attrib(element, {"spreadMethod", "focalPointRatio", "interpolationMethod"})
+        check_known_attrib(
+            element, {"spreadMethod", "focalPointRatio", "interpolationMethod"}
+        )
         spread_method = element.get("spreadMethod", "pad")
 
         return cls(svg_matrix, radius, focal_point, tuple(stops), spread_method)
+
+    @classmethod
+    def from_dict(cls, d):
+        params = d["radialGradient"]
+        matrix = map(lambda x: x if x != None else "NaN", params["gradientTransform"])
+
+        stops = []
+        for d in params["stop"]:
+            stops.append((d["offset"], d["stop-color"], d["stop-opacity"]))
+
+        return RadialGradient(
+            tuple(matrix),
+            params["r"],
+            params["fx"],
+            tuple(stops),
+            params["spreadMethod"],
+        )
 
     def to_svg(self):
         """Create an SVG <linearGradient> element from a LinearGradient."""
@@ -146,10 +203,32 @@ class RadialGradient:
         )
         for offset, color, alpha in self.stops:
             attrib = {"offset": f"{offset}%", "stop-color": color}
-            if alpha is not None:
-                attrib["stop-opacity"] = alpha
+            if alpha != 1:
+                attrib["stop-opacity"] = str(alpha)
             ET.SubElement(element, "stop", attrib)
         return element
+
+    def to_dict(self):
+        matrix = map(lambda x: x if x != "NaN" else None, self.matrix)
+        result = {
+            "radialGradient": {
+                "r": self.radius,
+                "fx": self.focal_point,
+                "gradientTransform": list(matrix),
+                "spreadMethod": self.spread_method,
+                "stop": [],
+            }
+        }
+
+        for offset, color, alpha in self.stops:
+            attrib = {"offset": offset, "stop-color": color}
+            if alpha is not None:
+                attrib["stop-opacity"] = alpha
+            else:
+                attrib["stop-opacity"] = 1
+            result["radialGradient"]["stop"].append(attrib)
+
+        return result
 
     @property
     def id(self):
