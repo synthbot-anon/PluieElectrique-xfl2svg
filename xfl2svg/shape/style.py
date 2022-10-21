@@ -49,7 +49,7 @@ def parse_fill_style(style):
 
     if style.tag.endswith("SolidColor"):
         update(attrib, ("fill", "fill-opacity"), parse_solid_color(style))
-        update(attrib, ("stroke", "stroke-opacity"), parse_solid_color(style))
+        # update(attrib, ("stroke", "stroke-opacity"), parse_solid_color(style))
     elif style.tag.endswith("LinearGradient"):
         gradient = LinearGradient.from_xfl(style)
         attrib["fill"] = gradient  # f"url(#{gradient.id})"
@@ -117,13 +117,16 @@ def parse_stroke_style(style):
             attrib["stroke-width"] = "0.05"
 
     if attrib["stroke-linejoin"] == "miter":
-        # If the XFL does not specify a miterLimit, Animate's SVG exporter will
-        # set stroke-miterlimit to 3. This seems to match what Flash does [*].
-        # But, in some cases, a limit of 5 better matches Animate's PNG render.
-        # So, that's what we use.
-        #
+        # Other projects* use a default stroke-miterlimit of 3, but that doesn't seem
+        # to work reliably, and it produces strokes that alternate between jarringly
+        # alternate between flat and sharp. It seems to work better to use a round
+        # join when the miter is under-specified.
         # [*]: https://github.com/ruffle-rs/ruffle/blob/d3becd9/core/src/avm1/globals/movie_clip.rs#L283-L290
-        attrib["stroke-miterlimit"] = style.get("miterLimit", "5")
+        if 'miterLimit' in style:
+            attrib["stroke-miterlimit"] = style.get("miterLimit", "3")
+        else:
+            attrib['stroke-linejoin'] = 'round'
+
 
     fill = style[0][0]
     if fill.tag.endswith("RadialGradient"):

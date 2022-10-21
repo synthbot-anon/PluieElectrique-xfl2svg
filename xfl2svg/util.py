@@ -131,7 +131,7 @@ class Traceable:
         raise NotImplementedError()
 
     def to_svg(self):
-        raise NotImplementedError()
+        return None
 
     @property
     def id(self):

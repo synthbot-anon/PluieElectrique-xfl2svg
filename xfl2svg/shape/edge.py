@@ -229,3 +229,19 @@ def xfl_domshape_to_edges(domshape: ET.Element) -> List[Tuple]:
 
         for path in edge_format_to_point_lists(edge_format):
             yield tuple(path), fill_id_left, fill_id_right, stroke_id
+
+
+def xfl_domshape_to_visible_edges(domshape, known_fills, known_strokes):
+    """Wrapper for xfl_domshape_to_edges to skip over unknown fills and strokes."""
+
+    for shape_piece in xfl_domshape_to_edges(domshape):
+        path, fill_id_left, fill_id_right, stroke_id = shape_piece
+        if fill_id_left not in known_fills:
+            fill_id_left = None
+        if fill_id_right not in known_fills:
+            fill_id_right = None
+        if stroke_id not in known_strokes:
+            stroke_id = None
+
+        if fill_id_left or fill_id_right or stroke_id:
+            yield path, fill_id_left, fill_id_right, stroke_id

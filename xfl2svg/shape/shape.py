@@ -1,13 +1,14 @@
 """Convert the XFL <DOMShape> element to SVG <path> elements."""
 
 from collections import defaultdict
+import copy
 from functools import reduce
 import json
 from sre_parse import expand_template
 import warnings
 import xml.etree.ElementTree as ET
 
-from xfl2svg.shape.edge import xfl_domshape_to_edges
+from xfl2svg.shape.edge import xfl_domshape_to_edges, xfl_domshape_to_visible_edges
 from xfl2svg.shape.style import parse_fill_style, parse_stroke_style, parse_json_style
 from xfl2svg.util import (
     Traceable,
@@ -294,7 +295,16 @@ def shape_graph_to_svg(shape, fill_styles, stroke_styles):
     def require_fill(index):
         # Get the SVG Element-compatible fill data for an index.
         if index not in fills:
-            fills[index], defs = svg_normalize_style(fill_styles[index])
+            fill, defs = svg_normalize_style(fill_styles[index])
+
+            # Add a hairwidth stroke around fills to avoid gaps between shapes
+            if 'fill' in fill:
+                fill['stroke'] = fill['fill']
+                fill["stroke-width"] = "0.05"
+                if 'fill-opacity' in fill:
+                    fill['stroke-opacity'] = fill['fill-opacity']
+
+            fills[index] = fill
             extra_defs.update(defs)
         return fills[index]
 
@@ -361,22 +371,6 @@ def xfl_domshape_to_styles(domshape):
         stroke_styles[index] = parse_stroke_style(style[0])
 
     return fill_styles, stroke_styles
-
-
-def xfl_domshape_to_visible_edges(domshape, known_fills, known_strokes):
-    """Wrapper for xfl_domshape_to_edges to skip over unknown fills and strokes."""
-
-    for shape_piece in xfl_domshape_to_edges(domshape):
-        path, fill_id_left, fill_id_right, stroke_id = shape_piece
-        if fill_id_left not in known_fills:
-            fill_id_left = None
-        if fill_id_right not in known_fills:
-            fill_id_right = None
-        if stroke_id not in known_strokes:
-            stroke_id = None
-
-        if fill_id_left or fill_id_right or stroke_id:
-            yield shape_piece
 
 
 def xfl_domshape_to_svg(domshape, mask=False):
