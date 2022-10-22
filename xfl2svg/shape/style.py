@@ -136,7 +136,8 @@ def parse_stroke_style(style):
     elif fill.tag.endswith("SolidColor"):
         update(attrib, ("stroke", "stroke-opacity"), parse_solid_color(fill))
     elif fill.tag.endswith("LinearGradient"):
-        pass  # TODO
+        gradient = LinearGradient.from_xfl(fill)
+        attrib['stroke'] = gradient
     else:
         warnings.warn(f"Unknown stroke fill: {xml_str(fill)}")
         return attrib

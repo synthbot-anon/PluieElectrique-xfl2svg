@@ -54,7 +54,7 @@ def interpolate_color(colx, ax, coly, ay, t):
     ai = interpolate_value(ax, ay, t)
 
     if ai == 0:
-        return '#FF0000', 0
+        return '#FFFFFF', 0
 
     ri = round(interpolate_value(rx*ax, ry*ay, t)/ai)
     gi = round(interpolate_value(gx*ax, gy*ay, t)/ai)
