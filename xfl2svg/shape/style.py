@@ -122,11 +122,10 @@ def parse_stroke_style(style):
         # alternate between flat and sharp. It seems to work better to use a round
         # join when the miter is under-specified.
         # [*]: https://github.com/ruffle-rs/ruffle/blob/d3becd9/core/src/avm1/globals/movie_clip.rs#L283-L290
-        if 'miterLimit' in style:
+        if "miterLimit" in style:
             attrib["stroke-miterlimit"] = style.get("miterLimit", "3")
         else:
-            attrib['stroke-linejoin'] = 'round'
-
+            attrib["stroke-linejoin"] = "round"
 
     fill = style[0][0]
     if fill.tag.endswith("RadialGradient"):
@@ -137,7 +136,7 @@ def parse_stroke_style(style):
         update(attrib, ("stroke", "stroke-opacity"), parse_solid_color(fill))
     elif fill.tag.endswith("LinearGradient"):
         gradient = LinearGradient.from_xfl(fill)
-        attrib['stroke'] = gradient
+        attrib["stroke"] = gradient
     else:
         warnings.warn(f"Unknown stroke fill: {xml_str(fill)}")
         return attrib

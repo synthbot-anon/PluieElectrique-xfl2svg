@@ -298,11 +298,11 @@ def shape_graph_to_svg(shape, fill_styles, stroke_styles):
             fill, defs = svg_normalize_style(fill_styles[index])
 
             # Add a hairwidth stroke around fills to avoid gaps between shapes
-            if 'fill' in fill:
-                fill['stroke'] = fill['fill']
+            if "fill" in fill:
+                fill["stroke"] = fill["fill"]
                 fill["stroke-width"] = "0.05"
-                if 'fill-opacity' in fill:
-                    fill['stroke-opacity'] = fill['fill-opacity']
+                if "fill-opacity" in fill:
+                    fill["stroke-opacity"] = fill["fill-opacity"]
 
             fills[index] = fill
             extra_defs.update(defs)
