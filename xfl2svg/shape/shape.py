@@ -10,13 +10,7 @@ import xml.etree.ElementTree as ET
 
 from xfl2svg.shape.edge import xfl_domshape_to_edges, xfl_domshape_to_visible_edges
 from xfl2svg.shape.style import parse_fill_style, parse_stroke_style, parse_json_style
-from xfl2svg.util import (
-    Traceable,
-    merge_bounding_boxes,
-    expanding_bounding_box,
-    line_bounding_box,
-    quadratic_bounding_box,
-)
+from xfl2svg.util import Traceable
 
 
 def svg_normalize_style(d):
@@ -77,33 +71,6 @@ def path_to_svg_format(point_list: list) -> str:
             # path.append("Z")
             pass
         return " ".join(path)
-
-
-def path_to_bounding_box(path):
-    point_iter = iter(path)
-    last_pt = next(point_iter)
-    bbox = [*last_pt, *last_pt]
-    last_command = "M"
-
-    try:
-        while True:
-            point = next(point_iter)
-
-            if isinstance(point[0], tuple):
-                # Quadratic segment defined by a start, a control point, and an end.
-                ctrl_pt = point[0]
-                end_pt = next(point_iter)
-                bbox_addition = quadratic_bounding_box(last_pt, ctrl_pt, end_pt)
-
-                bbox = merge_bounding_boxes(bbox, bbox_addition)
-                last_pt = end_pt
-            else:
-                # Line segment defined by a start and an end.
-                bbox = merge_bounding_boxes(bbox, line_bounding_box(last_pt, point))
-    except StopIteration:
-        if path[0] == path[-1]:
-            pass
-        return bbox
 
 
 # We can convert edges (segment path + color) into SVG <path> elements. The algorithm
@@ -291,6 +258,7 @@ def shape_graph_to_svg(shape, fill_styles, stroke_styles):
     fill_paths = []
     stroke_paths = []
     bbox = None
+    all_paths = []
 
     def require_fill(index):
         # Get the SVG Element-compatible fill data for an index.
@@ -325,8 +293,7 @@ def shape_graph_to_svg(shape, fill_styles, stroke_styles):
         path.set("d", " ".join(path_to_svg_format(pl) for pl in paths))
         fill_paths.append(path)
 
-        bbox_additions = map(path_to_bounding_box, paths)
-        bbox = reduce(merge_bounding_boxes, [bbox, *bbox_additions])
+        all_paths.extend((x, 0) for x in paths)
 
     for stroke_id, paths in shape.get_strokes():
         paths = list(paths)
@@ -339,10 +306,7 @@ def shape_graph_to_svg(shape, fill_styles, stroke_styles):
         stroke.set("d", " ".join(path_to_svg_format(pl) for pl in paths))
         stroke_paths.append(stroke)
 
-        path_bboxes = map(path_to_bounding_box, paths)
-        bbox_addition = reduce(merge_bounding_boxes, path_bboxes)
-        bbox_addition = expanding_bounding_box(bbox_addition, stroke_width)
-        bbox = merge_bounding_boxes(bbox, bbox_addition)
+        all_paths.extend((x, stroke_width) for x in paths)
 
     fill_g = None
     if fill_paths:
@@ -356,7 +320,7 @@ def shape_graph_to_svg(shape, fill_styles, stroke_styles):
         stroke_g = ET.Element("g")
         stroke_g.extend(stroke_paths)
 
-    return fill_g, stroke_g, extra_defs, bbox
+    return fill_g, stroke_g, extra_defs, all_paths
 
 
 def xfl_domshape_to_styles(domshape):
@@ -402,10 +366,6 @@ def xfl_domshape_to_svg(domshape, mask=False):
     shape = ShapeGraph()
     for edge in shape_edges:
         shape.add_edge(*edge)
-
-    # j = json_normalize_xfl_domshape(domshape, mask)
-    # return dict_shape_to_svg(j)
-    # print(json_normalize_xfl_domshape(domshape, mask))
 
     return shape_graph_to_svg(shape, fill_styles, stroke_styles)
 

@@ -1,7 +1,5 @@
 """Convert XFL gradients to SVG."""
 
-# TODO: Support RadialGradient
-
 
 from dataclasses import dataclass
 import math
@@ -55,7 +53,7 @@ class LinearGradient(Traceable):
                 )
             )
 
-        check_known_attrib(element, {"spreadMethod"})
+        check_known_attrib(element, {"spreadMethod", "interpolationMethod"})
         spread_method = element.get("spreadMethod", "pad")
 
         return cls(start, end, tuple(stops), spread_method)
@@ -100,27 +98,6 @@ class LinearGradient(Traceable):
             params["spreadMethod"],
         )
 
-    def to_svg(self):
-        """Create an SVG <linearGradient> element from a LinearGradient."""
-        element = ET.Element(
-            "linearGradient",
-            {
-                "id": self.id,
-                "gradientUnits": "userSpaceOnUse",
-                "x1": str(self.start[0]),
-                "y1": str(self.start[1]),
-                "x2": str(self.end[0]),
-                "y2": str(self.end[1]),
-                "spreadMethod": self.spread_method,
-            },
-        )
-        for offset, color, alpha in self.stops:
-            attrib = {"offset": f"{offset}%", "stop-color": color}
-            if alpha != 1:
-                attrib["stop-opacity"] = str(alpha)
-            ET.SubElement(element, "stop", attrib)
-        return element
-
     def to_dict(self):
         result = {
             "linearGradient": {
@@ -142,6 +119,27 @@ class LinearGradient(Traceable):
             result["linearGradient"]["stop"].append(attrib)
 
         return result
+
+    def to_svg(self):
+        """Create an SVG <linearGradient> element from a LinearGradient."""
+        element = ET.Element(
+            "linearGradient",
+            {
+                "id": self.id,
+                "gradientUnits": "userSpaceOnUse",
+                "x1": str(self.start[0]),
+                "y1": str(self.start[1]),
+                "x2": str(self.end[0]),
+                "y2": str(self.end[1]),
+                "spreadMethod": self.spread_method,
+            },
+        )
+        for offset, color, alpha in self.stops:
+            attrib = {"offset": f"{offset}%", "stop-color": color}
+            if alpha != 1:
+                attrib["stop-opacity"] = str(alpha)
+            ET.SubElement(element, "stop", attrib)
+        return element
 
     @property
     def id(self):
@@ -241,6 +239,28 @@ class RadialGradient(Traceable):
             params["spreadMethod"],
         )
 
+    def to_dict(self):
+        matrix = map(lambda x: x if x != "NaN" else None, self.matrix)
+        result = {
+            "radialGradient": {
+                "r": self.radius,
+                "fx": self.focal_point,
+                "gradientTransform": list(matrix),
+                "spreadMethod": self.spread_method,
+                "stop": [],
+            }
+        }
+
+        for offset, color, alpha in self.stops:
+            attrib = {"offset": offset, "stop-color": color}
+            if alpha is not None:
+                attrib["stop-opacity"] = alpha
+            else:
+                attrib["stop-opacity"] = 1
+            result["radialGradient"]["stop"].append(attrib)
+
+        return result
+
     def to_svg(self):
         """Create an SVG <linearGradient> element from a LinearGradient."""
         matrix = map(str, self.matrix)
@@ -265,28 +285,6 @@ class RadialGradient(Traceable):
             ET.SubElement(element, "stop", attrib)
 
         return element
-
-    def to_dict(self):
-        matrix = map(lambda x: x if x != "NaN" else None, self.matrix)
-        result = {
-            "radialGradient": {
-                "r": self.radius,
-                "fx": self.focal_point,
-                "gradientTransform": list(matrix),
-                "spreadMethod": self.spread_method,
-                "stop": [],
-            }
-        }
-
-        for offset, color, alpha in self.stops:
-            attrib = {"offset": offset, "stop-color": color}
-            if alpha is not None:
-                attrib["stop-opacity"] = alpha
-            else:
-                attrib["stop-opacity"] = 1
-            result["radialGradient"]["stop"].append(attrib)
-
-        return result
 
     @property
     def id(self):

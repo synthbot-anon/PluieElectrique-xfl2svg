@@ -72,9 +72,9 @@ def parse_stroke_style(style):
     Returns a dict of SVG style attributes.
     """
     if not style.tag.endswith("SolidStroke"):
-        if not style.tag.endswith("RadialGradient"):  # TODO?
+        if not style.tag.endswith("PaintBrushStroke"):
             warnings.warn(f"Unknown stroke style: {xml_str(style)}")
-            return {"fill": "none"}
+        return {"fill": "none"}
 
     check_known_attrib(
         style,
