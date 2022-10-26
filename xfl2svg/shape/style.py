@@ -61,7 +61,8 @@ def parse_fill_style(style):
         # attrib["stroke"] = f"url(#{gradient.id})"
         # extra_defs[gradient.id] = gradient.to_svg()
     else:
-        warnings.warn(f"Unknown fill style: {xml_str(style)}")
+        if not style.tag.endswith('BitmapFill'):
+            warnings.warn(f"Unknown fill style: {xml_str(style)}")
 
     return attrib
 
