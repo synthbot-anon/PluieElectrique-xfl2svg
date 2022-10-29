@@ -2,7 +2,7 @@
 
 
 from dataclasses import dataclass
-import math
+import math, numpy
 from typing import List, Tuple
 import xml.etree.ElementTree as ET
 
@@ -11,13 +11,12 @@ from xfl2svg.util import check_known_attrib, get_matrix, Traceable
 
 @dataclass(frozen=True)
 class LinearGradient(Traceable):
-    start: Tuple[float, float]
-    end: Tuple[float, float]
+    matrix: Tuple[float]
     stops: Tuple[Tuple[float, str, float], ...]
     spread_method: str
 
     @classmethod
-    def from_xfl(cls, element):
+    def from_xfl(cls, element, document_dims):
         """Create a LinearGradient from the XFL <LinearGradient> element.
 
         The start and end points of the gradient are defined by the <Matrix> M:
@@ -38,9 +37,16 @@ class LinearGradient(Traceable):
         coordinates, which are more precise).
         """
 
-        a, b, _, _, tx, ty = map(float, get_matrix(element))
-        start = (a * -16384/20 + tx, b * -16384/20 + ty)  # fmt: skip
-        end   = (a *  16384/20 + tx, b *  16384/20 + ty)  # fmt: skip
+        a, b, c, d, tx, ty = map(float, get_matrix(element))
+
+        normalized_matrix = (
+            a * 2 * document_dims[0],
+            b * 2 * document_dims[0],
+            c * 2 * document_dims[1],
+            d * 2 * document_dims[1],
+            tx - a * 16384 / 20,
+            ty - b * 16384 / 20,
+        )
 
         stops = []
         for entry in element.iterfind("{*}GradientEntry"):
@@ -56,14 +62,16 @@ class LinearGradient(Traceable):
         check_known_attrib(element, {"spreadMethod", "interpolationMethod"})
         spread_method = element.get("spreadMethod", "pad")
 
-        return cls(start, end, tuple(stops), spread_method)
+        return cls(normalized_matrix, tuple(stops), spread_method)
 
-    def to_xfl(self):
+    def to_xfl(self, document_dims=None):
         # TODO: figure out how to calculate c and d matrix elements
-        a = (self.end[0] - self.start[0]) / 2 / (16384 / 20)
-        b = (self.end[1] - self.start[1]) / 2 / (16384 / 20)
-        tx = (self.end[0] + self.start[0]) / 2
-        ty = (self.end[1] + self.start[1]) / 2
+        a = self.matrix[0] / document_dims[0] / 2
+        b = self.matrix[1] / document_dims[0] / 2
+        c = self.matrix[2] / document_dims[1] / 2
+        d = self.matrix[3] / document_dims[1] / 2
+        tx = self.matrix[4] + a * 16384 / 20
+        ty = self.matrix[5] + b * 16384 / 20
 
         gradient_entries = []
         for ratio, color, alpha in self.stops:
@@ -76,7 +84,7 @@ class LinearGradient(Traceable):
         result = f"""
             <LinearGradient spreadMethod="{self.spread_method}">
                 <matrix>
-                    <Matrix a="{a}" b="{b}" tx="{tx}" ty="{ty}"/>
+                    <Matrix a="{a}" b="{b}" c="{c}" d="{d}" tx="{tx}" ty="{ty}"/>
                 </matrix>
                 {''.join(gradient_entries)}
 
@@ -88,7 +96,7 @@ class LinearGradient(Traceable):
     def from_dict(cls, d):
         params = d["linearGradient"]
         stops = []
-        for d in params["stop"]:
+        for d in params["stops"]:
             stops.append((d["offset"], d["stop-color"], d["stop-opacity"]))
 
         return LinearGradient(
@@ -101,12 +109,9 @@ class LinearGradient(Traceable):
     def to_dict(self):
         result = {
             "linearGradient": {
-                "x1": self.start[0],
-                "y1": self.start[1],
-                "x2": self.end[0],
-                "y2": self.end[1],
+                "gradientTransform": list(self.matrix),
                 "spreadMethod": self.spread_method,
-                "stop": [],
+                "stops": [],
             }
         }
 
@@ -120,17 +125,26 @@ class LinearGradient(Traceable):
 
         return result
 
-    def to_svg(self):
+    def to_svg(self, canvas_dims=(864, 486)):
         """Create an SVG <linearGradient> element from a LinearGradient."""
+        matrix = (
+            str(x)
+            for x in [
+                self.matrix[0] / canvas_dims[0],
+                self.matrix[1] / canvas_dims[0],
+                self.matrix[2] / canvas_dims[1],
+                self.matrix[3] / canvas_dims[1],
+                self.matrix[4],
+                self.matrix[5],
+            ]
+        )
+
         element = ET.Element(
             "linearGradient",
             {
                 "id": self.id,
                 "gradientUnits": "userSpaceOnUse",
-                "x1": str(self.start[0]),
-                "y1": str(self.start[1]),
-                "x2": str(self.end[0]),
-                "y2": str(self.end[1]),
+                "gradientTransform": f"matrix({','.join(matrix)})",
                 "spreadMethod": self.spread_method,
             },
         )
@@ -139,7 +153,23 @@ class LinearGradient(Traceable):
             if alpha != 1:
                 attrib["stop-opacity"] = str(alpha)
             ET.SubElement(element, "stop", attrib)
-        return element
+
+        def _update_fn(canvas_dims):
+            matrix = (
+                str(x)
+                for x in [
+                    self.matrix[0] / canvas_dims[0],
+                    self.matrix[1] / canvas_dims[0],
+                    self.matrix[2] / canvas_dims[1],
+                    self.matrix[3] / canvas_dims[1],
+                    self.matrix[4],
+                    self.matrix[5],
+                ]
+            )
+
+            element.set("gradientTransform", f"matrix({','.join(matrix)})")
+
+        return element, _update_fn
 
     @property
     def id(self):
@@ -193,7 +223,7 @@ class RadialGradient(Traceable):
 
         return cls(svg_matrix, radius, focal_point, tuple(stops), spread_method)
 
-    def to_xfl(self):
+    def to_xfl(self, **kwargs):
         norm = self.radius / (16384 / 20)
         # TODO: figure out how to calculate c and d matrix elements
         a = self.matrix[0] * norm
@@ -228,7 +258,7 @@ class RadialGradient(Traceable):
         matrix = map(lambda x: x if x != None else "NaN", params["gradientTransform"])
 
         stops = []
-        for d in params["stop"]:
+        for d in params["stops"]:
             stops.append((d["offset"], d["stop-color"], d["stop-opacity"]))
 
         return RadialGradient(
@@ -247,7 +277,7 @@ class RadialGradient(Traceable):
                 "fx": self.focal_point,
                 "gradientTransform": list(matrix),
                 "spreadMethod": self.spread_method,
-                "stop": [],
+                "stops": [],
             }
         }
 
@@ -261,7 +291,7 @@ class RadialGradient(Traceable):
 
         return result
 
-    def to_svg(self):
+    def to_svg(self, *args, **kwargs):
         """Create an SVG <linearGradient> element from a LinearGradient."""
         matrix = map(str, self.matrix)
         element = ET.Element(
@@ -284,7 +314,7 @@ class RadialGradient(Traceable):
                 attrib["stop-opacity"] = str(alpha)
             ET.SubElement(element, "stop", attrib)
 
-        return element
+        return element, None
 
     @property
     def id(self):

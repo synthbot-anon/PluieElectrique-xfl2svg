@@ -55,7 +55,7 @@ class Traceable:
     def to_dict(self):
         raise NotImplementedError()
 
-    def to_svg(self):
+    def to_svg(self, canvas_dims=None):
         return None
 
     @property

@@ -17,15 +17,18 @@ def svg_normalize_style(d):
     """Expand out any Traceable items in a style dict to use in SVG elements."""
     result = {}
     extra_defs = {}
+    update_fns = []
 
     for key, value in d.items():
         if isinstance(value, Traceable):
-            extra_defs[value.id] = value.to_svg()
+            extra_defs[value.id], update_fn = value.to_svg()
             result[key] = f"url(#{value.id})"
+            if update_fn:
+                update_fns.append(update_fn)
         else:
             result[key] = value
 
-    return result, extra_defs
+    return result, extra_defs, update_fns
 
 
 # This function converts point lists into the SVG path format.
@@ -259,11 +262,12 @@ def shape_graph_to_svg(shape, fill_styles, stroke_styles):
     stroke_paths = []
     bbox = None
     all_paths = []
+    updaters = []
 
     def require_fill(index):
         # Get the SVG Element-compatible fill data for an index.
         if index not in fills:
-            fill, defs = svg_normalize_style(fill_styles[index])
+            fill, defs, update_fns = svg_normalize_style(fill_styles[index])
 
             # Add a hairwidth stroke around fills to avoid gaps between shapes
             if "fill" in fill:
@@ -274,13 +278,15 @@ def shape_graph_to_svg(shape, fill_styles, stroke_styles):
 
             fills[index] = fill
             extra_defs.update(defs)
+            updaters.extend(update_fns)
         return fills[index]
 
     def require_stroke(index):
         # Get the SVG Element-compatible stroke data for an index.
         if index not in strokes:
-            strokes[index], defs = svg_normalize_style(stroke_styles[index])
+            strokes[index], defs, update_fns = svg_normalize_style(stroke_styles[index])
             extra_defs.update(defs)
+            updaters.extend(update_fns)
         return strokes[index]
 
     for fill_id, paths in shape.get_fills():
@@ -320,36 +326,38 @@ def shape_graph_to_svg(shape, fill_styles, stroke_styles):
         stroke_g = ET.Element("g")
         stroke_g.extend(stroke_paths)
 
-    return fill_g, stroke_g, extra_defs, all_paths
+    return fill_g, stroke_g, extra_defs, all_paths, updaters
 
 
-def xfl_domshape_to_styles(domshape):
+def xfl_domshape_to_styles(domshape, document_dims):
     fill_styles = {}
     for style in domshape.iterfind(".//{*}FillStyle"):
         index = style.get("index")
-        fill_styles[index] = parse_fill_style(style[0])
+        fill_styles[index] = parse_fill_style(style[0], document_dims)
 
     stroke_styles = {}
     for style in domshape.iterfind(".//{*}StrokeStyle"):
         index = style.get("index")
-        stroke_styles[index] = parse_stroke_style(style[0])
+        stroke_styles[index] = parse_stroke_style(style[0], document_dims)
 
     return fill_styles, stroke_styles
 
 
-def xfl_domshape_to_svg(domshape, mask=False):
+def xfl_domshape_to_svg(domshape, document_dims, mask=False):
     """Convert the XFL <DOMShape> element to SVG <path> elements.
 
     Args:
         domshape: An XFL <DOMShape> element
+        document_dims: A (width, height) tuple for the document the domshape came from
         mask: If True, all fill colors will be set to #FFFFFF. This ensures
               that the resulting mask is fully transparent.
 
-    Returns a 4-tuple of:
+    Returns a 5-tuple of:
         SVG <g> element containing filled <path>s
         SVG <g> element containing stroked <path>s
         dict of extra elements to put in <defs> (e.g. filters and gradients)
-        bounding box [left, bottom, right, top] of the elements
+        list of paths, points and (controls), used in the shape
+        list of fn((svg_width, svg_height)) to finalize styles
     """
 
     if mask:
@@ -358,7 +366,7 @@ def xfl_domshape_to_svg(domshape, mask=False):
         stroke_styles = defaultdict(lambda: {"fill": "#FFFFFF", "stroke": "none"})
         shape_edges = xfl_domshape_to_edges(domshape)
     else:
-        fill_styles, stroke_styles = xfl_domshape_to_styles(domshape)
+        fill_styles, stroke_styles = xfl_domshape_to_styles(domshape, document_dims)
         shape_edges = xfl_domshape_to_visible_edges(
             domshape, fill_styles, stroke_styles
         )

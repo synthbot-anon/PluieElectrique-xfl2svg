@@ -35,7 +35,7 @@ def get_radius(bounding_box):
     return (width**2 + height**2) ** 0.5 / 2
 
 
-def parse_fill_style(style):
+def parse_fill_style(style, document_dims):
     """Parse an XFL <FillStyle> element.
 
     Returns a tuple:
@@ -51,7 +51,7 @@ def parse_fill_style(style):
         update(attrib, ("fill", "fill-opacity"), parse_solid_color(style))
         # update(attrib, ("stroke", "stroke-opacity"), parse_solid_color(style))
     elif style.tag.endswith("LinearGradient"):
-        gradient = LinearGradient.from_xfl(style)
+        gradient = LinearGradient.from_xfl(style, document_dims)
         attrib["fill"] = gradient  # f"url(#{gradient.id})"
         # attrib["stroke"] = f"url(#{gradient.id})"
         # extra_defs[gradient.id] = gradient.to_svg()
@@ -61,13 +61,13 @@ def parse_fill_style(style):
         # attrib["stroke"] = f"url(#{gradient.id})"
         # extra_defs[gradient.id] = gradient.to_svg()
     else:
-        if not style.tag.endswith('BitmapFill'):
+        if not style.tag.endswith("BitmapFill"):
             warnings.warn(f"Unknown fill style: {xml_str(style)}")
 
     return attrib
 
 
-def parse_stroke_style(style):
+def parse_stroke_style(style, document_dims):
     """Parse an XFL <StrokeStyle> element.
 
     Returns a dict of SVG style attributes.
@@ -136,7 +136,7 @@ def parse_stroke_style(style):
     elif fill.tag.endswith("SolidColor"):
         update(attrib, ("stroke", "stroke-opacity"), parse_solid_color(fill))
     elif fill.tag.endswith("LinearGradient"):
-        gradient = LinearGradient.from_xfl(fill)
+        gradient = LinearGradient.from_xfl(fill, document_dims)
         attrib["stroke"] = gradient
     else:
         warnings.warn(f"Unknown stroke fill: {xml_str(fill)}")
