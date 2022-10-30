@@ -186,7 +186,7 @@ class RadialGradient(Traceable):
     spread_method: str
 
     @classmethod
-    def from_xfl(cls, element):
+    def from_xfl(cls, element, document_dims):
         a, b, c, d, tx, ty = map(float, get_matrix(element))
         norm = (a**2 + b**2) ** 0.5
         radius = 16384 / 20 * norm

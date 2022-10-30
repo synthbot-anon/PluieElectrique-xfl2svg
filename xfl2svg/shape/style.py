@@ -56,7 +56,7 @@ def parse_fill_style(style, document_dims):
         # attrib["stroke"] = f"url(#{gradient.id})"
         # extra_defs[gradient.id] = gradient.to_svg()
     elif style.tag.endswith("RadialGradient"):
-        gradient = RadialGradient.from_xfl(style)
+        gradient = RadialGradient.from_xfl(style, document_dims)
         attrib["fill"] = gradient  # f"url(#{gradient.id})"
         # attrib["stroke"] = f"url(#{gradient.id})"
         # extra_defs[gradient.id] = gradient.to_svg()
@@ -130,7 +130,7 @@ def parse_stroke_style(style, document_dims):
 
     fill = style[0][0]
     if fill.tag.endswith("RadialGradient"):
-        gradient = RadialGradient.from_xfl(fill)
+        gradient = RadialGradient.from_xfl(fill, document_dims)
         attrib["stroke"] = gradient  # f"url(#{gradient.id})"
         # extra_defs[gradient.id] = gradient.to_svg()
     elif fill.tag.endswith("SolidColor"):
