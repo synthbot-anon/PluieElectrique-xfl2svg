@@ -403,13 +403,13 @@ def json_normalize_path(path):
     return result
 
 
-def json_normalize_xfl_domshape(domshape, mask=False):
+def json_normalize_xfl_domshape(domshape, document_dims, mask=False):
     result = {"mask": mask}
     if mask:
         # TODO: Figure out how strokes are supposed to behave in masks
         shape_edges = xfl_domshape_to_edges(domshape)
     else:
-        fill_styles, stroke_styles = xfl_domshape_to_styles(domshape)
+        fill_styles, stroke_styles = xfl_domshape_to_styles(domshape, document_dims)
 
         result["fill_styles"] = result_fills = {}
         for index, style in fill_styles.items():

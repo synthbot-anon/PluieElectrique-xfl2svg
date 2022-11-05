@@ -95,13 +95,13 @@ class LinearGradient(Traceable):
     @classmethod
     def from_dict(cls, d):
         params = d["linearGradient"]
+        matrix = params["gradientTransform"]
         stops = []
         for d in params["stops"]:
             stops.append((d["offset"], d["stop-color"], d["stop-opacity"]))
 
         return LinearGradient(
-            (params["x1"], params["y1"]),
-            (params["x2"], params["y2"]),
+            tuple(matrix),
             tuple(stops),
             params["spreadMethod"],
         )
@@ -121,7 +121,7 @@ class LinearGradient(Traceable):
                 attrib["stop-opacity"] = alpha
             else:
                 attrib["stop-opacity"] = 1
-            result["linearGradient"]["stop"].append(attrib)
+            result["linearGradient"]["stops"].append(attrib)
 
         return result
 
@@ -287,7 +287,7 @@ class RadialGradient(Traceable):
                 attrib["stop-opacity"] = alpha
             else:
                 attrib["stop-opacity"] = 1
-            result["radialGradient"]["stop"].append(attrib)
+            result["radialGradient"]["stops"].append(attrib)
 
         return result
 
